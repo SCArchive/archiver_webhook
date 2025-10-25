@@ -1,94 +1,81 @@
 # SoundCloud Archiver Webhook
 
-A Rust application that watches SoundCloud users for new tracks and sends them to a Discord webhook with rich formatting and audio files. Features granular parallelism controls to optimize performance while avoiding rate limits.
+A Rust application that monitors SoundCloud users for new track uploads and sends them to a Discord webhook with complete metadata and audio files.
 
-## Features
+## Quick Start
 
-- Monitors SoundCloud users for new track uploads
-- Downloads all available audio formats (MP3, AAC, Opus, etc.) for best quality preservation
-- Downloads original high-resolution artwork
-- Creates complete JSON snapshots of track metadata
-- Sends rich embeds to Discord with track details and media files
-- Simple tracks database for persistent state tracking
-- Configurable polling interval
-- Automatic client ID regeneration
-- Optional scraping of users' liked tracks
-- Auto-follow mode to automatically add new followings from a source user
-- Granular parallelism controls for SoundCloud API, Discord webhooks, and processing tasks
-- Parallel processing of tracks and transcoding operations
+### Prerequisites
 
-## Requirements
+- [ffmpeg](https://ffmpeg.org/download.html) installed and available in your PATH
+- A Discord webhook URL ([create one here](https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks))
 
-### Standard Installation
-- Rust 1.70+
-- `ffmpeg` command line utility must be in your PATH for audio transcoding
+### Download Binary
 
-### Docker Installation
-- Docker
-- Docker Compose (optional)
+Download the latest release for your platform from the [Releases page](https://github.com/scarchives/archiver_webhook/releases).
 
-## Setup
+Or download from GitHub Actions artifacts (requires GitHub login):
+- [Linux (Debian 12)](https://github.com/scarchives/archiver_webhook/actions)
+- [Windows](https://github.com/scarchives/archiver_webhook/actions)
 
-### Standard Installation
+### Generate Configuration
 
-1. Clone the repository
-2. Build with Cargo:
-   ```bash
-   cargo build --release
-   ```
-3. Create a `config.json` file in the same directory as the executable:
-   ```json
-   {
-     "discord_webhook_url": "YOUR_DISCORD_WEBHOOK_URL",
-     "log_level": "info",
-     "poll_interval_sec": 60,
-     "users_file": "users.json",
-     "tracks_file": "tracks.json",
-     "max_tracks_per_user": 500,
-     "pagination_size": 50,
-     "temp_dir": null,
-     "max_soundcloud_parallelism": 2,
-     "max_discord_parallelism": 4,
-     "max_processing_parallelism": 4,
-     "scrape_user_likes": false,
-     "max_likes_per_user": 500,
-     "auto_follow_source": null,
-     "auto_follow_interval": 24,
-     "db_save_interval": 1,
-     "db_save_tracks": 5,
-     "show_ffmpeg_output": false,
-     "log_file": "latest.log"
-   }
-   ```
-4. Create a `users.json` file with the SoundCloud user IDs to watch:
-   ```json
-   {
-     "users": [
-       "123456",
-       "789012"
-     ]
-   }
-   ```
-
-### Docker Installation
-
-1. Make sure Docker is installed on your system
-2. Create the required configuration files in your project directory:
-   - `config.json` (same format as above, but set `"temp_dir": "/app/temp"`)
-   - `users.json` (same format as above)
-   - Create an empty `tracks.json` file or let the application create it
-3. Create a `temp` directory for temporary files:
-   ```bash
-   mkdir -p temp
-   ```
-
-#### Using Pre-built Image
+The easiest way to get started is to use the `--generate-config` command, which automatically creates both `config.json` and `users.json` based on a SoundCloud user's followings:
 
 ```bash
-# Pull the latest image
-docker pull ghcr.io/scarchive/archiver_webhook:latest
+./archiver_webhook --generate-config https://soundcloud.com/your-username
+```
 
-# Run with your configuration files
+This will:
+1. Fetch all users that the specified user follows
+2. Interactively prompt you for configuration values (Discord webhook URL, poll interval, etc.)
+3. Create `config.json` and `users.json` files automatically
+4. Display each followed user with their track count for reference
+
+All prompts have sensible defaults - just press Enter to accept them.
+
+### Run the Application
+
+After generating your configuration:
+
+```bash
+./archiver_webhook
+```
+
+The application will:
+- Monitor all configured SoundCloud users for new tracks
+- Download track metadata, audio files, and artwork
+- Send everything to your Discord webhook
+- Save progress to `tracks.json` to avoid reposting
+
+## Building from Source
+
+### Requirements
+
+- Rust 1.70 or later
+- ffmpeg (runtime dependency)
+
+### Build
+
+```bash
+git clone https://github.com/scarchives/archiver_webhook.git
+cd archiver_webhook
+cargo build --release
+```
+
+The compiled binary will be in `target/release/archiver_webhook`.
+
+## Docker
+
+### Using Pre-built Image
+
+```bash
+# Create configuration files first (run locally or in a temporary container)
+docker run --rm -it \
+  -v "$(pwd):/data" \
+  ghcr.io/scarchive/archiver_webhook:latest \
+  --generate-config https://soundcloud.com/your-username
+
+# Run the archiver
 docker run -d --name archiver_webhook \
   -v "$(pwd)/config.json:/app/config.json:ro" \
   -v "$(pwd)/users.json:/app/users.json:rw" \
@@ -97,9 +84,9 @@ docker run -d --name archiver_webhook \
   ghcr.io/scarchive/archiver_webhook:latest
 ```
 
-#### Using Docker Compose (recommended)
+### Docker Compose
 
-Create a `docker-compose.yml` file:
+Create `docker-compose.yml`:
 
 ```yaml
 version: '3'
@@ -114,244 +101,205 @@ services:
       - ./users.json:/app/users.json:rw
       - ./tracks.json:/app/tracks.json:rw
       - ./temp:/app/temp:rw
-    command: ""
 ```
 
 Then run:
 
 ```bash
+# Generate config (one-time)
+docker-compose run --rm archiver_webhook --generate-config https://soundcloud.com/your-username
+
+# Start the service
 docker-compose up -d
-```
 
-View logs:
-
-```bash
+# View logs
 docker-compose logs -f
 ```
 
-Run one-time commands:
+## Configuration
 
-```bash
-# Resolve a SoundCloud URL
-docker-compose run --rm archiver_webhook --resolve https://soundcloud.com/artist/track-name
-
-# Initialize tracks database
-docker-compose run --rm archiver_webhook --init-tracks
-
-# Post a specific track
-docker-compose run --rm archiver_webhook --post-track 1234567890
-```
-
-#### Building the Image Locally
-
-Build the image:
-
-```bash
-docker build -t archiver_webhook .
-```
-
-Run in watcher mode:
-
-```bash
-docker run -d --name archiver_webhook \
-  -v "$(pwd)/config.json:/app/config.json:ro" \
-  -v "$(pwd)/users.json:/app/users.json:rw" \
-  -v "$(pwd)/tracks.json:/app/tracks.json:rw" \
-  -v "$(pwd)/temp:/app/temp:rw" \
-  archiver_webhook
-```
-
-Run one-time commands:
-
-```bash
-docker run --rm \
-  -v "$(pwd)/config.json:/app/config.json:ro" \
-  -v "$(pwd)/users.json:/app/users.json:rw" \
-  -v "$(pwd)/tracks.json:/app/tracks.json:rw" \
-  -v "$(pwd)/temp:/app/temp:rw" \
-  archiver_webhook --resolve https://soundcloud.com/artist/track-name
-```
-
-## Configuration Options
-
-- `discord_webhook_url` (required): The Discord webhook URL to send track notifications to
-- `log_level` (default: "info"): Logging level for the application
-- `poll_interval_sec` (default: 60): How often to check for new tracks, in seconds
-- `users_file` (default: "users.json"): Path to the file containing user IDs to watch
-- `tracks_file` (default: "tracks.json"): Path to the tracks database file for persistent storage
-- `max_tracks_per_user` (default: 500): Maximum number of tracks to fetch per user (total limit)
-- `pagination_size` (default: 50): Number of tracks/likes to fetch per API request (pagination size)
-- `temp_dir` (optional): Directory for temporary files (if not specified, system temp dir is used)
-- `max_soundcloud_parallelism` (default: 2): Maximum number of parallel SoundCloud API requests (keep this low to avoid rate limiting)
-- `max_discord_parallelism` (default: 4): Maximum number of parallel Discord webhook requests
-- `max_processing_parallelism` (default: 4): Maximum number of parallel processing tasks (ffmpeg, etc.)
-- `scrape_user_likes` (default: false): Whether to scrape liked tracks from users being monitored
-- `max_likes_per_user` (default: 500): Maximum number of likes to fetch for each user when `scrape_user_likes` is enabled (uses `pagination_size` for API requests)
-- `auto_follow_source` (optional): User ID or URL whose followings you want to automatically add to your watched users
-- `auto_follow_interval` (default: 24): How often to check for new followings (in poll cycles). Checking is also performed once immediately on startup.
-- `db_save_interval` (default: 1): How often to save the database (in poll cycles).
-- `db_save_tracks` (default: 5): Number of new tracks to process before automatically saving the database. This works in addition to the time-based saving with `db_save_interval`.
-- `show_ffmpeg_output` (default: false): Whether to show ffmpeg output in the console logs
-- `log_file` (default: "latest.log"): Path to the log file for application logs
-
-## Parallelism Controls
-
-The application provides three distinct parallelism controls to help you manage resource usage and avoid rate limiting from external services:
-
-### 1. SoundCloud API Parallelism (`max_soundcloud_parallelism`)
-
-- **Default value**: 2
-- **Purpose**: Controls how many simultaneous SoundCloud API requests can be made
-- **Recommended value**: 1-2
-- **Notes**: SoundCloud's API will rate limit your requests if you make too many simultaneous calls. Keep this value low (1-2) to avoid getting rate limited. This affects how many users are processed concurrently during the polling cycle.
-
-### 2. Discord Webhook Parallelism (`max_discord_parallelism`)
-
-- **Default value**: 4
-- **Purpose**: Controls how many simultaneous Discord webhook requests can be made
-- **Recommended value**: 4-10
-- **Notes**: Discord has its own rate limiting for webhooks. If you send too many requests too quickly, Discord will start rejecting them. A value of 4-10 should be fine for most use cases, but you can adjust based on your Discord server's tier and usage.
-
-### 3. Processing Parallelism (`max_processing_parallelism`)
-
-- **Default value**: 4
-- **Purpose**: Controls how many simultaneous processing tasks (like ffmpeg encoding) can run
-- **Recommended value**: Based on your CPU cores (typically 4-8)
-- **Notes**: This affects CPU and memory usage. Higher values will use more system resources but process tracks faster. For systems with 4+ CPU cores, a value of 4-8 works well.
-
-### Benefits of Granular Control
-
-These separate parallelism controls provide several benefits:
-
-1. **Prevent rate limiting**: By limiting API calls to external services appropriately, you avoid getting temporarily blocked or throttled
-2. **Optimize resource usage**: You can tune each type of operation to your system's capabilities
-3. **Balance performance and reliability**: Process tracks as quickly as possible without overwhelming external services or your system
-4. **Adapt to different environments**: Tune settings based on whether you're running on a powerful server or a modest home system
-
-### Recommended Configuration
-
-For most users, the default values should work well:
+The `config.json` file is automatically created by `--generate-config`, but you can edit it manually:
 
 ```json
 {
+  "discord_webhook_url": "YOUR_DISCORD_WEBHOOK_URL",
+  "log_level": "info",
+  "poll_interval_sec": 60,
+  "users_file": "users.json",
+  "tracks_file": "tracks.json",
+  "max_tracks_per_user": 500,
+  "pagination_size": 50,
+  "temp_dir": null,
   "max_soundcloud_parallelism": 2,
   "max_discord_parallelism": 4,
-  "max_processing_parallelism": 4
+  "max_processing_parallelism": 4,
+  "scrape_user_likes": false,
+  "max_likes_per_user": 500,
+  "auto_follow_source": null,
+  "auto_follow_interval": 24,
+  "db_save_interval": 1,
+  "db_save_tracks": 5,
+  "show_ffmpeg_output": false,
+  "log_file": "latest.log"
 }
 ```
 
-For systems with limited resources:
+### Key Configuration Options
 
-```json
-{
-  "max_soundcloud_parallelism": 1,
-  "max_discord_parallelism": 2,
-  "max_processing_parallelism": 2
-}
-```
+- **discord_webhook_url** (required): Discord webhook URL for notifications
+- **poll_interval_sec**: How often to check for new tracks (default: 60 seconds)
+- **max_soundcloud_parallelism**: Parallel SoundCloud API requests (default: 2, keep low to avoid rate limits)
+- **max_discord_parallelism**: Parallel Discord webhook requests (default: 4)
+- **max_processing_parallelism**: Parallel processing tasks like ffmpeg (default: 4)
+- **scrape_user_likes**: Monitor users' liked tracks in addition to their uploads (default: false)
+- **auto_follow_source**: User URL/ID to auto-follow their followings (optional)
 
-For powerful systems with good network connections:
+See the full [Configuration Reference](#configuration-reference) below for all options.
 
-```json
-{
-  "max_soundcloud_parallelism": 2,
-  "max_discord_parallelism": 8,
-  "max_processing_parallelism": 8
-}
-```
-
-## Usage
-
-### Standard Installation
-
-Run the application in watcher mode (default):
+## Command Line Options
 
 ```bash
+# Run in watcher mode (monitors for new tracks continuously)
 ./archiver_webhook
-```
 
-To resolve a SoundCloud URL and get information (artist, track, user info):
+# Generate config.json and users.json interactively
+./archiver_webhook --generate-config URL
 
-```bash
-./archiver_webhook --resolve https://soundcloud.com/artist/track-name
-```
+# Resolve a SoundCloud URL and display information
+./archiver_webhook --resolve URL
 
-To initialize the tracks database with all existing tracks from watched users:
-
-```bash
+# Initialize tracks database with existing tracks from watched users
 ./archiver_webhook --init-tracks
+
+# Post a specific track to Discord (bypasses database check)
+./archiver_webhook --post-track TRACK_ID_OR_URL
+
+# Look up a track by Discord message ID
+./archiver_webhook --lookup-discord-id DISCORD_MESSAGE_ID
+
+# Show help
+./archiver_webhook --help
 ```
 
-To post a specific track to Discord without adding it to the database:
+## Features
 
-```bash
-./archiver_webhook --post-track 1234567890
-# Or with a URL
-./archiver_webhook --post-track https://soundcloud.com/artist/track-name
-```
-
-To interactively generate config.json and users.json based on a SoundCloud user's followings:
-
-```bash
-./archiver_webhook --generate-config https://soundcloud.com/user-to-follow
-```
-
-This will:
-1. Fetch the user's profile
-2. Get all users they follow
-3. Interactively create config.json with default values
-4. Generate users.json with all followed users' IDs
-5. Display track counts for each user for reference
-
-Defaults can be accepted by pressing Enter for each prompt.
-
-# Logging
-
-Logging is controlled by the `log_level` field in your `config.json`.
-Valid values: `trace`, `debug`, `info`, `warn`, `error` (default: `info`).
-
-The application provides:
-- Console output with colored log levels
-- File logging to `latest.log` (or custom path specified in config)
-- Windows-specific console title updates showing current stats:
-  ```
-  SCArchive Webhook | Tracks: 123456 | New: 500 | Errors: 14
-  ```
-
-Example config:
-```json
-{
-  "log_level": "debug",
-  "log_file": "latest.log",
-  ...
-}
-```
-
-## How to Find SoundCloud User IDs
-
-SoundCloud doesn't expose user IDs directly in the UI, but you can find them by:
-
-1. Going to the user's profile page
-2. Using the `--resolve` command with the user's profile URL
-3. The command will display the user ID which you can then add to your users.json file
+- **Automatic Discovery**: Use `--generate-config` to automatically set up monitoring for all users that a SoundCloud account follows
+- **Complete Archival**: Downloads all available audio formats, high-resolution artwork, and complete JSON metadata
+- **Discord Integration**: Sends rich embeds with track details and media files to Discord
+- **Efficient Monitoring**: Tracks database prevents duplicate posts
+- **Parallelism Controls**: Separate limits for SoundCloud API, Discord webhooks, and processing tasks
+- **Likes Monitoring**: Optionally monitor users' liked tracks in addition to their uploads
+- **Auto-follow**: Automatically add new followings from a source user
+- **Flexible Logging**: Configurable log levels with both console and file output
 
 ## What Gets Archived
 
-For each track, the bot will:
-1. Download all available audio formats (MP3, AAC, Opus, etc.) depending on what SoundCloud provides
-2. Download the original high-resolution artwork
-3. Create a complete JSON snapshot of all track metadata
-4. Send everything to Discord with a rich embed containing track details
-5. Automatically handle Discord's upload restrictions (8MB per file limit, max 10 attachments per message)
+For each new track detected:
 
-The bot attempts to preserve all available audio qualities and formats rather than just converting to MP3/OGG.
+1. **Audio Files**: All available formats (MP3, AAC, Opus, etc.) - preserves maximum quality
+2. **Artwork**: Original high-resolution cover art
+3. **Metadata**: Complete JSON snapshot of track information
+4. **Discord Post**: Rich embed with track details, artist info, and all files attached
 
-## Limitations
+The bot handles Discord's limits automatically (8MB per file, max 10 attachments).
 
-- Discord has attachment size limits (8MB per file for regular servers, 50MB per file for Nitro-boosted servers)
-- Rate limits apply to both SoundCloud API and Discord webhooks
-- FFMPEG must be installed and in PATH for audio transcoding
+## Finding SoundCloud User IDs
+
+To find a user's ID or get information about any SoundCloud URL:
+
+```bash
+./archiver_webhook --resolve https://soundcloud.com/username
+```
+
+This displays the user ID, username, and other details.
+
+## Configuration Reference
+
+<details>
+<summary>Click to expand full configuration options</summary>
+
+### Required
+
+- **discord_webhook_url** (string): Discord webhook URL for sending notifications
+
+### General Settings
+
+- **log_level** (string): Logging verbosity - `trace`, `debug`, `info`, `warn`, or `error` (default: `info`)
+- **log_file** (string): Path to log file (default: `latest.log`)
+- **poll_interval_sec** (number): How often to check for new tracks in seconds (default: `60`)
+
+### File Paths
+
+- **users_file** (string): Path to JSON file with user IDs to monitor (default: `users.json`)
+- **tracks_file** (string): Path to JSON database of known tracks (default: `tracks.json`)
+- **temp_dir** (string or null): Directory for temporary files (default: system temp directory)
+
+### SoundCloud API Settings
+
+- **max_tracks_per_user** (number): Maximum total tracks to fetch per user (default: `500`)
+- **pagination_size** (number): Tracks to fetch per API request (default: `50`)
+- **max_soundcloud_parallelism** (number): Concurrent SoundCloud API requests - keep low (1-2) to avoid rate limiting (default: `2`)
+
+### Likes Monitoring
+
+- **scrape_user_likes** (boolean): Whether to monitor users' liked tracks (default: `false`)
+- **max_likes_per_user** (number): Maximum likes to fetch per user when enabled (default: `500`)
+
+### Auto-follow
+
+- **auto_follow_source** (string or null): User ID or URL whose followings to automatically add (default: `null`)
+- **auto_follow_interval** (number): How often to check for new followings in poll cycles (default: `24`)
+
+### Performance Settings
+
+- **max_discord_parallelism** (number): Concurrent Discord webhook requests (default: `4`)
+- **max_processing_parallelism** (number): Concurrent processing tasks like ffmpeg - tune based on CPU cores (default: `4`)
+
+### Database Settings
+
+- **db_save_interval** (number): How often to save database in poll cycles (default: `1`)
+- **db_save_tracks** (number): Number of new tracks before auto-saving database (default: `5`)
+
+### Debugging
+
+- **show_ffmpeg_output** (boolean): Show ffmpeg output in console logs (default: `false`)
+
+</details>
+
+## Troubleshooting
+
+### ffmpeg not found
+
+Ensure ffmpeg is installed and in your system PATH:
+
+```bash
+# Test if ffmpeg is available
+ffmpeg -version
+
+# Linux (Debian/Ubuntu)
+sudo apt-get install ffmpeg
+
+# macOS
+brew install ffmpeg
+
+# Windows
+# Download from https://ffmpeg.org/download.html
+```
+
+### Rate Limiting
+
+If you encounter SoundCloud rate limiting:
+- Reduce `max_soundcloud_parallelism` to 1
+- Increase `poll_interval_sec`
+- Reduce `max_tracks_per_user`
+
+### Discord Upload Failures
+
+If Discord rejects uploads:
+- Check file size limits (8MB for regular servers, 50MB for boosted)
+- Verify webhook URL is correct and active
+- Reduce `max_discord_parallelism` if getting rate limited
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+MIT License - see [LICENSE](LICENSE) file for details.
