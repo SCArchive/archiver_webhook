@@ -39,7 +39,6 @@ jobs:
         if: matrix.container == 'debian:12'
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           . "$HOME/.cargo/env"
           rustup target add ${{ matrix.target }}
 
@@ -78,14 +77,14 @@ jobs:
         if: matrix.container == 'debian:12'
         shell: bash
         run: |
-          . "$HOME/.cargo/env"
+          export PATH="$HOME/.cargo/bin:$PATH"
           cargo build --release --target ${{ matrix.target }}
 
       - name: Run tests (Debian)
         if: matrix.container == 'debian:12'
         shell: bash
         run: |
-          . "$HOME/.cargo/env"
+          export PATH="$HOME/.cargo/bin:$PATH"
           cargo test --target ${{ matrix.target }}
 
       - name: Build (Windows)
